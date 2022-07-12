@@ -1,0 +1,204 @@
+
+/*
+  Enums
+*/
+CREATE TABLE E_Document_Types(
+	document_type nvarchar(50) PRIMARY KEY
+);
+
+CREATE TABLE E_Order_States(
+	state_name nvarchar(50) PRIMARY KEY
+);
+
+CREATE TABLE E_Video_Mediums(
+	medium_name nvarchar(50) PRIMARY KEY
+);
+
+CREATE TABLE E_Worker_Positions(
+	position_name nvarchar(50) PRIMARY KEY
+);
+
+/*
+  Documents
+*/
+CREATE TABLE Documents(
+	document_id nvarchar(50) PRIMARY KEY,
+	expiration_date date CHECK (expiration_date > GETDATE()),
+	type nvarchar(50) FOREIGN KEY REFERENCES E_Document_Types(document_type) NOT NULL
+);
+
+
+/*
+  Workers
+*/
+CREATE TABLE Workers(
+	worker_id int PRIMARY KEY,
+	name nvarchar(50) NOT NULL,
+	last_name nvarchar(50) NOT NULL,
+	position nvarchar(50) FOREIGN KEY REFERENCES E_Worker_Positions(position_name) NOT NULL,
+	document_id nvarchar(50) FOREIGN KEY REFERENCES Documents(document_id) NOT NULL
+);
+CREATE SEQUENCE Workers_ID
+AS INT
+START WITH 1
+INCREMENT BY 1;
+
+/*
+  Clients
+*/
+CREATE TABLE Clients(
+	client_id int  PRIMARY KEY,
+	name nvarchar(50) NOT NULL,
+	last_name nvarchar(50) NOT NULL,
+	document_id nvarchar(50) FOREIGN KEY REFERENCES Documents(document_id) NOT NULL,
+	join_date date DEFAULT GETDATE() NOT NULL
+);
+CREATE SEQUENCE Clients_ID
+AS INT
+START WITH 1
+INCREMENT BY 1;
+
+
+/*
+  Orders
+*/
+CREATE TABLE Orders(
+	order_id int PRIMARY KEY,
+	client_id int FOREIGN KEY REFERENCES Clients(client_id),
+	worker_id int FOREIGN KEY REFERENCES Workers(worker_id),
+	state nvarchar(50) FOREIGN KEY REFERENCES E_Order_States(state_name) NOT NULL,
+	rental_period int DEFAULT 7 CHECK(rental_period > 0) NOT NULL,
+	penalty smallmoney DEFAULT 0 NOT NULL,
+	created_at date DEFAULT GETDATE() CHECK(created_at = GETDATE()) NOT NULL,
+	total_cost smallmoney CHECK(total_cost > 0) NOT NULL
+);
+CREATE SEQUENCE Order_ID
+AS INT
+START WITH 1
+INCREMENT BY 1;
+
+
+/*
+  Videos
+*/
+CREATE TABLE Videos(
+	title nvarchar(200) PRIMARY KEY,
+	premiere_date date,
+	genre nvarchar(200),
+	director nvarchar (200),
+	duration time(1)
+)
+
+
+/*
+  Products
+*/
+CREATE TABLE Products(
+	product_id int  PRIMARY KEY,
+	video_name nvarchar(200) FOREIGN KEY REFERENCES Videos(title) NOT NULL,
+	price smallmoney CHECK(price > 0) NOT NULL,
+	medium nvarchar(50) FOREIGN KEY REFERENCES E_Video_Mediums(medium_name) NOT NULL,
+	is_available BIT DEFAULT 1 NOT NULL
+)
+
+CREATE SEQUENCE Products_ID
+AS INT
+START WITH 1
+INCREMENT BY 1;
+
+
+/*
+  Order_Items
+*/
+CREATE TABLE Order_Items(
+	order_id int FOREIGN KEY REFERENCES Orders(order_id) NOT NULL,
+	product_id int FOREIGN KEY REFERENCES Products(product_id) NOT NULL
+);
+
+
+/*
+  Indexes
+*/
+CREATE INDEX orders_index
+ON orders(order_id, state, client_id);
+
+CREATE INDEX products_index
+ON products(video_name);
+
+CREATE INDEX videos_index
+ON videos(title, director);
+
+GO
+CREATE TRIGGER tr_clients
+	ON Clients
+	FOR DELETE
+AS
+	DELETE FROM Documents
+	WHERE exists(SELECT document_id FROM deleted WHERE deleted.document_id = Documents.document_id)
+
+GO
+
+
+GO
+CREATE TRIGGER tr_workers
+	ON Workers
+	FOR DELETE
+AS
+	DELETE FROM Documents
+	WHERE exists(SELECT document_id FROM deleted WHERE deleted.document_id = Documents.document_id)
+
+GO
+
+
+GO
+CREATE TRIGGER tr_order_items
+	ON Order_Items
+	FOR INSERT
+AS
+	UPDATE Products
+	SET is_available = 0
+	WHERE exists(SELECT product_id FROM inserted WHERE inserted.product_id = Products.product_id)
+
+GO
+
+
+
+GO
+CREATE TRIGGER tr_order_ended
+	ON Orders
+	AFTER UPDATE
+AS
+	UPDATE Products
+	SET is_available = 1
+	WHERE product_id in(
+							SELECT product_id FROM Order_Items
+							WHERE order_id in (SELECT order_id FROM Orders WHERE Orders.state = 'zakoñczone')
+						)
+GO
+
+GO
+CREATE VIEW v_all_orders AS
+SELECT *
+FROM Orders;
+GO
+
+GO
+CREATE VIEW v_all_workers AS
+SELECT w.*, d.type, d.expiration_date
+FROM Workers w
+JOIN Documents d on d.document_id = w.document_id;
+GO
+
+GO
+CREATE VIEW v_all_clients AS
+SELECT c.*, d.type, d.expiration_date
+FROM Clients c
+JOIN Documents d on d.document_id = c.document_id;
+GO
+
+GO
+CREATE VIEW v_all_products AS
+SELECT v.title, v.director, p.price, p.medium, p.is_available
+FROM Products p
+JOIN Videos v on p.video_name = v.title;
+GO
